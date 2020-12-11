@@ -635,7 +635,6 @@ void FrustumProjector::CallbackDetections(
   // END Implementation: Thrust for clustering************************************************************************
 
 
-
   detected_object_array.header.stamp = header_cloud_in.stamp;
   image_detections_set.pub_object_pose_and_label_.publish(detected_object_array);
 
