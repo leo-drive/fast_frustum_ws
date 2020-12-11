@@ -29,6 +29,7 @@
 #include <boost/thread/thread.hpp>
 #include <thrust/host_vector.h>
 #include <thrust/transform.h>
+#include <thrust/sequence.h>
 #include <thrust/execution_policy.h>
 
 class FrustumProjector {

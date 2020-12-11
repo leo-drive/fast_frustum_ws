@@ -529,8 +529,8 @@ void FrustumProjector::CallbackDetections(
     auto stop3_2 = std::chrono::high_resolution_clock::now();
 
     auto duration3_2 = std::chrono::duration_cast<std::chrono::microseconds>(stop3_2 - start3_2);
-    std::cout << "Time taken by iteration with Boost threads: " <<
-              duration3_2.count() << " microseconds" << std::endl;
+    //std::cout << "Time taken by iteration with Boost threads: " <<
+    //          duration3_2.count() << " microseconds" << std::endl;
 
 
   // END Implementation: Boost Thread for frustum iteration****************************************************************
@@ -539,10 +539,8 @@ void FrustumProjector::CallbackDetections(
     return std::sqrt(std::pow(p.x, 2) + std::pow(p.y, 2) + std::pow(p.z, 2));
   };
 
-
   HelperRosRelated::PublishCloud<Point>(all_frustum_all_points, image_detections_set.pub_all_frustum_all_points_,
                                         header_cloud_in.stamp, frame_lidar_);
-
 
   autoware_msgs::DetectedObjectArray detected_object_array;
   Cloud::Ptr frustum_closest_objects_center(new Cloud);
@@ -553,35 +551,47 @@ void FrustumProjector::CallbackDetections(
     thrust::host_vector<std::vector<Cloud::Ptr>> clusters(count_detections);
     thrust::host_vector<bool> cloud_frustum_is_empty(count_detections);
     thrust::host_vector<Cloud::Ptr> vector_centroids(count_detections);
+    thrust::host_vector<int> detection_ids(count_detections,1);
+    thrust::sequence(detection_ids.begin(), detection_ids.end());
+    thrust::host_vector<int> detection_ids_result(count_detections,1);
 
-    auto result_begin = thrust::make_zip_iterator(thrust::make_tuple(clusters.begin(),
-                      cloud_frustum_is_empty.begin(),vector_centroids.begin()));
-    auto result_end = thrust::make_zip_iterator(thrust::make_tuple(clusters.end(),
-                      cloud_frustum_is_empty.end(), vector_centroids.end()));
+    //for(int i=0; i<count_detections; i++)
+    //    std::cout << "Detection ids: " << detection_ids[i] << std::endl;
 
-    auto CreateClusters = [](const auto& cloud_frustum) -> thrust::tuple<std::vector<Cloud::Ptr>,bool, Cloud::Ptr>
+    auto input_begin = thrust::make_zip_iterator(thrust::make_tuple(vector_cloud_frustums.begin(),detection_ids.begin()));
+    auto input_end = thrust::make_zip_iterator(thrust::make_tuple(vector_cloud_frustums.end(),detection_ids.end()));
+
+    auto result_begin = thrust::make_zip_iterator(thrust::make_tuple(clusters.begin(), cloud_frustum_is_empty.begin(),
+                                                                     vector_centroids.begin(),detection_ids_result.begin()));
+    auto result_end = thrust::make_zip_iterator(thrust::make_tuple(clusters.end(), cloud_frustum_is_empty.end(),
+                                                                   vector_centroids.end(),detection_ids_result.end()));
+
+    auto CreateClusters = [](const auto& input) -> thrust::tuple<std::vector<Cloud::Ptr>,bool, Cloud::Ptr, int>
     {
+        Cloud::Ptr cloud_frustum = thrust::get<0>(input);
+        int detection_id = thrust::get<1>(input);
+
         std::vector<Cloud::Ptr> vector_clusters;
         Cloud::Ptr frustum_cloud_all_centroids;
 
         if (cloud_frustum->points.empty())
-            return thrust::make_tuple(vector_clusters,true, frustum_cloud_all_centroids);
+            return thrust::make_tuple(vector_clusters,true, frustum_cloud_all_centroids, detection_id);
 
         vector_clusters = PclStuff::Clusterer(frustum_cloud_all_centroids, cloud_frustum,2 * 0.25,
                                                    1,
                                                    999999);
 
-        return thrust::make_tuple(vector_clusters,false, frustum_cloud_all_centroids);
+        return thrust::make_tuple(vector_clusters,false, frustum_cloud_all_centroids, detection_id);
     };
 
-    thrust::transform(thrust::system::tbb::par, vector_cloud_frustums.begin(), vector_cloud_frustums.end(),
-                      result_begin, CreateClusters);
+    thrust::transform(thrust::system::tbb::par, input_begin, input_end, result_begin, CreateClusters);
 
     for(auto it = result_begin; it != result_end; it++)
     {
         std::vector<Cloud::Ptr> vector_clusters = thrust::get<0>(*it);
         bool cloud_frustum_is_empty_ = thrust::get<1>(*it);
         auto frustum_cloud_all_centroids = thrust::get<2>(*it);
+        auto detection_id = thrust::get<3>(*it);
 
         if(!cloud_frustum_is_empty_)
         {
@@ -603,10 +613,8 @@ void FrustumProjector::CallbackDetections(
             object.pose.position.x = closest_point.x;
             object.pose.position.y = closest_point.y;
             object.pose.position.z = closest_point.z;
-            //object.id = interested_detections.detections[i].results[0].id;
-            //object.score = interested_detections.detections[i].results[0].score;
-
-            // not: i'yi korumak için sequence kullan.
+            object.id = interested_detections.detections[detection_id].results[0].id;
+            object.score = interested_detections.detections[detection_id].results[0].score;
 
             detected_object_array.objects.push_back(object);
 
@@ -619,11 +627,10 @@ void FrustumProjector::CallbackDetections(
         }
 
     }
-
     auto stop8 = std::chrono::high_resolution_clock::now();
     auto duration8 = std::chrono::duration_cast<std::chrono::microseconds>(stop8 - start8);
-    std::cout << "Time taken by Thrust clustering:         " <<
-              duration8.count() << " microseconds" << std::endl;
+    //std::cout << "Time taken by Thrust clustering:         " <<
+    //          duration8.count() << " microseconds" << std::endl;
 
   // END Implementation: Thrust for clustering************************************************************************
 

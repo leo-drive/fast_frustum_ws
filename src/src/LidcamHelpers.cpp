@@ -151,7 +151,6 @@ void LidcamHelpers::fillFrustumCloud(pcltype::Cloud::Ptr cloud_in, Eigen::Matrix
 
         if(point_in_image_plane)
         {
-
             for (unsigned int j = 0; j < count_detection; ++j) {
 
                 const auto &detection = interested_detections.detections[j];
