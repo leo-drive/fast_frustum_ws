@@ -1,0 +1,6 @@
+<launch>
+
+  <node pkg="frustum_projector" name="frustum_projector_node"
+        type="frustum_projector" output="screen">
+  </node>
+</launch>
