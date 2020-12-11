@@ -9,10 +9,7 @@ PclStuff::Clusterer(Cloud::Ptr &centroids,
                     Cloud::ConstPtr cloud_in,
                     float tolerance,
                     int min_point_count,
-                    int max_point_count,
-                    float x_max,
-                    float y_max,
-                    float z_max) {
+                    int max_point_count) {
   pcl::search::KdTree<Point>::Ptr kdtree(
     new pcl::search::KdTree<Point>);
   kdtree->setInputCloud(cloud_in);

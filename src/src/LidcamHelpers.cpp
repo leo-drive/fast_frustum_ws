@@ -151,8 +151,6 @@ void LidcamHelpers::fillFrustumCloud(pcltype::Cloud::Ptr cloud_in, Eigen::Matrix
 
         if(point_in_image_plane)
         {
-            for(int i=0; i<count_detection; i++)
-                vector_cloud_frustums[i]->points.push_back(point);
 
             for (unsigned int j = 0; j < count_detection; ++j) {
 

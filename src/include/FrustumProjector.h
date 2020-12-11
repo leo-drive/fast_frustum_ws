@@ -26,6 +26,11 @@
 #include<visualization_msgs/MarkerArray.h>
 #include "QueueCloud.h"
 
+#include <boost/thread/thread.hpp>
+#include <thrust/host_vector.h>
+#include <thrust/transform.h>
+#include <thrust/execution_policy.h>
+
 class FrustumProjector {
 public:
   explicit FrustumProjector(ros::NodeHandle &nh);

@@ -16,10 +16,7 @@ public:
                                            Cloud::ConstPtr cloud_in,
                                            float tolerance,
                                            int min_point_count,
-                                           int max_point_count,
-                                           float x_max = 999999,
-                                           float y_max = 999999,
-                                           float z_max = 999999);
+                                           int max_point_count);
 
 
 };

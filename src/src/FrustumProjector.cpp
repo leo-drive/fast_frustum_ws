@@ -13,7 +13,7 @@
 #include <std_msgs/Int8.h>
 #include "SoftwareHealthChecker.h"
 
-#include <thrust/host_vector.h>
+
 
 using pcltype::Point;
 using pcltype::Cloud;
@@ -469,108 +469,76 @@ void FrustumProjector::CallbackDetections(
 
   image_detections_set.pub_polygons_detections_.publish(*polygons);
 
-  auto point_is_within_rect = [](const cv::Point &point,
-                                 const vision_msgs::BoundingBox2D &bbox,
-                                 const cv::Size &img_size,
-                                 const int camera_id) {
-    const auto &bbox_orig = bbox;
-    auto new_bbox = bbox;
+  // START Implementation: Boost Thread for frustum iteration***********************************************************
+    auto start3_2 = std::chrono::high_resolution_clock::now();
 
-    float scale_factor;
-    if (camera_id == 8 || camera_id == 9) {
-      scale_factor = 1.0;
-    } else {
-      scale_factor = 1.66666;
-    }
+    int num_threads = 12;
+    std::vector<boost::thread> thread_vec(num_threads);
 
+    Cloud::Ptr result_cloud(new Cloud);
 
-    new_bbox.center.x *= scale_factor;
-    new_bbox.center.y *= scale_factor;
-    new_bbox.size_x *= scale_factor;
-    new_bbox.size_y *= scale_factor;
+    std::vector<std::vector<Cloud::Ptr>> thread_vector_cloud_frustums(num_threads);
 
-//        float x_min = new_bbox.center.x - new_bbox.size_x / 2;
-//        float x_max = new_bbox.center.x + new_bbox.size_x / 2;
-//        float y_min = new_bbox.center.y - new_bbox.size_y / 2;
-//        float y_max = new_bbox.center.y + new_bbox.size_y / 2;
-
-    double re_align_size = 5;
-
-    double x_min = new_bbox.center.x - new_bbox.size_x / 2;
-    x_min = ((x_min - re_align_size) >= 0 ? (x_min - re_align_size) : 0);
-    double x_max = new_bbox.center.x + new_bbox.size_x / 2;
-    x_max = ((x_max + re_align_size) >= img_size.width ? img_size.width : (x_max + re_align_size));
-    double y_min = new_bbox.center.y - new_bbox.size_y / 2;
-    y_min = ((y_min - re_align_size) > 0 ? (y_min - re_align_size) : 0);
-    double y_max = new_bbox.center.y + new_bbox.size_y / 2;
-    y_max = ((y_max + re_align_size) > img_size.height ? img_size.height : (y_max + re_align_size));
-
-    return point.x > x_min &&
-           point.y > y_min &&
-           point.x < x_max &&
-           point.y < y_max;
-  };
-
-  std::vector<Cloud::Ptr> vector_cloud_frustums(count_detections);
-  for (auto &cloud : vector_cloud_frustums) {
-    cloud.reset(new Cloud);
-  }
-
-  // Iterate all points for projection and coloring and populating frustum vector
-
-  for (const auto &point : cloud_in->points) {
-
-    double distance = sqrt(pow(point.x, 2) + pow(point.y, 2));
-    if (distance <= 0.2)
-      continue;
-
-    cv::Point point_in_image;
-
-    pcltype::Point p_uv;
-
+    for(unsigned int i=0; i<num_threads; i++)
     {
-      Eigen::Vector4d pos;
-      pos << point.x, point.y, point.z, 1;
+        unsigned int start_index = cloud_in->size()/num_threads*i;
+        unsigned int end_index = cloud_in->size()/num_threads*(i+1);
+        Cloud::iterator it_begin;
+        Cloud::iterator it_end;
 
-      Eigen::Vector4d vec_image_plane_coords = mat_point_transformer * pos;
+        if(i==num_threads-1)
+        {
+            it_begin = cloud_in->points.begin() + start_index;
+            it_end = cloud_in->points.end();
 
-      if (vec_image_plane_coords(2) <= 0)
-        continue;
+        }else{
 
-      point_in_image.x = (int) (vec_image_plane_coords(0) / vec_image_plane_coords(2));
-      point_in_image.y = (int) (vec_image_plane_coords(1) / vec_image_plane_coords(2));
-      p_uv.x = vec_image_plane_coords(2) * 1000;
-      p_uv.y = -vec_image_plane_coords(0);
-      p_uv.z = -vec_image_plane_coords(1);
-
-
-      if (point_in_image.x < 0
-          || point_in_image.y < 0
-          || point_in_image.x >= img_size.width
-          || point_in_image.y >= img_size.height)
-        continue;
-
-
-      for (size_t j = 0; j < count_detections; ++j) {
-
-        const auto &detection = interested_detections.detections[j];
-
-        if (point_is_within_rect(point_in_image, detection.bbox, img_size, id)) {
-          vector_cloud_frustums[j]->points.push_back(point);
+            it_begin = cloud_in->points.begin() + start_index;
+            it_end = cloud_in->points.begin() + end_index;
         }
-      }
 
+        thread_vec[i] = boost::thread([=, &thread_vector_cloud_frustums]
+                                      {
+        LidcamHelpers::fillFrustumCloud(cloud_in, mat_point_transformer, img_size,
+            thread_vector_cloud_frustums, i, interested_detections, id,  it_begin, it_end);
+                                      });
     }
 
-  }
+    for (auto& thread : thread_vec)
+        thread.join();
+
+    std::vector<Cloud::Ptr> vector_cloud_frustums(count_detections);
+    for (auto &cloud : vector_cloud_frustums)
+        cloud.reset(new Cloud);
+
+    // Collect cloud vectors from threads
+    for(unsigned int i=0; i<num_threads; i++)
+    {
+        for(unsigned int j=0; j<count_detections; j++)
+        {
+            for(const auto& point : thread_vector_cloud_frustums[i][j]->points)
+                vector_cloud_frustums[j]->points.push_back(point);
+            //std::cout << "Thread id " << i << " | Detection id " << j << " size: " << thread_vector_cloud_frustums[i][j]->size() << std::endl;
+        }
+    }
+
+    Cloud::Ptr all_frustum_all_points(new Cloud);
+    for (const auto& cloud : vector_cloud_frustums)
+        *all_frustum_all_points += *cloud;
+
+    auto stop3_2 = std::chrono::high_resolution_clock::now();
+
+    auto duration3_2 = std::chrono::duration_cast<std::chrono::microseconds>(stop3_2 - start3_2);
+    std::cout << "Time taken by iteration with Boost threads: " <<
+              duration3_2.count() << " microseconds" << std::endl;
+
+
+  // END Implementation: Boost Thread for frustum iteration****************************************************************
 
   auto distance_of_point = [](const Point &p) -> float {
     return std::sqrt(std::pow(p.x, 2) + std::pow(p.y, 2) + std::pow(p.z, 2));
   };
-  Cloud::Ptr all_frustum_all_points(new Cloud);
-  for (auto &cloud : vector_cloud_frustums) {
-    *all_frustum_all_points += *cloud;
-  }
+
 
   HelperRosRelated::PublishCloud<Point>(all_frustum_all_points, image_detections_set.pub_all_frustum_all_points_,
                                         header_cloud_in.stamp, frame_lidar_);
@@ -579,52 +547,86 @@ void FrustumProjector::CallbackDetections(
   autoware_msgs::DetectedObjectArray detected_object_array;
   Cloud::Ptr frustum_closest_objects_center(new Cloud);
 
-  for (size_t i = 0; i < vector_cloud_frustums.size(); ++i) {
+  // START Implementation: Thrust for clustering****************************************************************************
+    auto start8 = std::chrono::high_resolution_clock::now();
 
-    Cloud::Ptr cloud_frustum = vector_cloud_frustums[i];
+    thrust::host_vector<std::vector<Cloud::Ptr>> clusters(count_detections);
+    thrust::host_vector<bool> cloud_frustum_is_empty(count_detections);
+    thrust::host_vector<Cloud::Ptr> vector_centroids(count_detections);
 
-    if (cloud_frustum->points.empty())
-      continue;
+    auto result_begin = thrust::make_zip_iterator(thrust::make_tuple(clusters.begin(),
+                      cloud_frustum_is_empty.begin(),vector_centroids.begin()));
+    auto result_end = thrust::make_zip_iterator(thrust::make_tuple(clusters.end(),
+                      cloud_frustum_is_empty.end(), vector_centroids.end()));
 
-    Cloud::Ptr frustum_cloud_all_centroids;
-    std::vector<Cloud::Ptr> vector_clusters = PclStuff::Clusterer(frustum_cloud_all_centroids,
-                                                                  cloud_frustum,
-                                                                  2 * 0.25,
-                                                                  1,
-                                                                  999999);
+    auto CreateClusters = [](const auto& cloud_frustum) -> thrust::tuple<std::vector<Cloud::Ptr>,bool, Cloud::Ptr>
+    {
+        std::vector<Cloud::Ptr> vector_clusters;
+        Cloud::Ptr frustum_cloud_all_centroids;
 
-    if (vector_clusters.empty())
-      break;
+        if (cloud_frustum->points.empty())
+            return thrust::make_tuple(vector_clusters,true, frustum_cloud_all_centroids);
 
-    PclStuff::Point closest_point;
+        vector_clusters = PclStuff::Clusterer(frustum_cloud_all_centroids, cloud_frustum,2 * 0.25,
+                                                   1,
+                                                   999999);
 
-    double distance = 9999;
+        return thrust::make_tuple(vector_clusters,false, frustum_cloud_all_centroids);
+    };
 
-    for (const auto &point : frustum_cloud_all_centroids->points) {
+    thrust::transform(thrust::system::tbb::par, vector_cloud_frustums.begin(), vector_cloud_frustums.end(),
+                      result_begin, CreateClusters);
 
-      if (distance > distance_of_point(point)) {
-        distance = distance_of_point(point);
-        closest_point.x = point.x;
-        closest_point.y = point.y;
-        closest_point.z = point.z;
-      }
+    for(auto it = result_begin; it != result_end; it++)
+    {
+        std::vector<Cloud::Ptr> vector_clusters = thrust::get<0>(*it);
+        bool cloud_frustum_is_empty_ = thrust::get<1>(*it);
+        auto frustum_cloud_all_centroids = thrust::get<2>(*it);
+
+        if(!cloud_frustum_is_empty_)
+        {
+            Point closest_point;
+
+            double distance = 9999;
+
+            for (const auto &point : frustum_cloud_all_centroids->points) {
+
+                if (distance > distance_of_point(point)) {
+                    distance = distance_of_point(point);
+                    closest_point.x = point.x;
+                    closest_point.y = point.y;
+                    closest_point.z = point.z;
+                }
+            }
+
+            autoware_msgs::DetectedObject object;
+            object.pose.position.x = closest_point.x;
+            object.pose.position.y = closest_point.y;
+            object.pose.position.z = closest_point.z;
+            //object.id = interested_detections.detections[i].results[0].id;
+            //object.score = interested_detections.detections[i].results[0].score;
+
+            // not: i'yi korumak için sequence kullan.
+
+            detected_object_array.objects.push_back(object);
+
+            frustum_closest_objects_center->points.push_back(closest_point);
+
+
+            HelperRosRelated::PublishCloud<Point>(frustum_cloud_all_centroids,
+                                                  image_detections_set.pub_frustum_cloud_centroid_,
+                                                  header_cloud_in.stamp, frame_lidar_);
+        }
+
     }
 
-    autoware_msgs::DetectedObject object;
-    object.pose.position.x = closest_point.x;
-    object.pose.position.y = closest_point.y;
-    object.pose.position.z = closest_point.z;
-    object.id = interested_detections.detections[i].results[0].id;
-    object.score = interested_detections.detections[i].results[0].score;
+    auto stop8 = std::chrono::high_resolution_clock::now();
+    auto duration8 = std::chrono::duration_cast<std::chrono::microseconds>(stop8 - start8);
+    std::cout << "Time taken by Thrust clustering:         " <<
+              duration8.count() << " microseconds" << std::endl;
 
-    detected_object_array.objects.push_back(object);
+  // END Implementation: Thrust for clustering************************************************************************
 
-    frustum_closest_objects_center->points.push_back(closest_point);
-
-    HelperRosRelated::PublishCloud<Point>(frustum_cloud_all_centroids,
-                                          image_detections_set.pub_frustum_cloud_centroid_,
-                                          header_cloud_in.stamp, frame_lidar_);
-  }
 
 
   detected_object_array.header.stamp = header_cloud_in.stamp;
