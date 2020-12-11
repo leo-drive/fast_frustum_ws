@@ -30,12 +30,14 @@ public:
 
   static std::tuple<int, int, int> ColorPicker(double distance);
 
+
+  // Göktuğ:
   static void fillFrustumCloud(pcltype::Cloud::Ptr cloud_in, Eigen::Matrix4d mat_point_transformer,cv::Size img_size,
                                  std::vector<std::vector<pcltype::Cloud::Ptr>>& thread_vector_cloud_frustums, unsigned int thread_id,
                                  const vision_msgs::Detection2DArray& interested_detections, int camera_id,
                                  pcltype::Cloud::iterator it_begin, pcltype::Cloud::iterator it_end);
 
-
+  static std::pair<bool, cv::Point> pointInImagePlane(pcltype::Point point, Eigen::Matrix4d mat_point_transformer, cv::Size img_size);
   static bool pointInDetection(const cv::Point &point, const vision_msgs::BoundingBox2D &bbox,const cv::Size &img_size, const int camera_id);
 
 

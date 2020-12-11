@@ -126,3 +126,139 @@ pcltype::Point LidcamHelpers::PointImageToPoint3D(const cv::Point &point_in_imag
   p.z = pos_scaled(2);
   return p;
 }
+
+
+
+
+void LidcamHelpers::fillFrustumCloud(pcltype::Cloud::Ptr cloud_in, Eigen::Matrix4d mat_point_transformer,cv::Size img_size,
+                                     std::vector<std::vector<Cloud::Ptr>>& thread_vector_cloud_frustums, unsigned int thread_id,
+                                     const vision_msgs::Detection2DArray& interested_detections, int camera_id,
+                                     pcltype::Cloud::iterator it_begin, pcltype::Cloud::iterator it_end)
+{
+    size_t count_detection = interested_detections.detections.size();
+
+    std::vector<Cloud::Ptr> vector_cloud_frustums(count_detection);
+    for (auto &cloud : vector_cloud_frustums) {
+        cloud.reset(new Cloud);
+    }
+
+    for (auto it_point = it_begin; it_point != it_end; it_point++)
+    {
+        auto point = *it_point;
+        auto pair = LidcamHelpers::pointInImagePlane(point, mat_point_transformer, img_size);
+        bool point_in_image_plane = pair.first;
+        cv::Point point_in_image = pair.second;
+
+        if(point_in_image_plane)
+        {
+            for(int i=0; i<count_detection; i++)
+                vector_cloud_frustums[i]->points.push_back(point);
+
+            for (unsigned int j = 0; j < count_detection; ++j) {
+
+                const auto &detection = interested_detections.detections[j];
+
+                if (LidcamHelpers::pointInDetection(point_in_image, detection.bbox, img_size, camera_id))
+                {
+                    vector_cloud_frustums[j]->points.push_back(point);
+                }
+            }
+        }
+    }
+    thread_vector_cloud_frustums[thread_id] = vector_cloud_frustums;
+}
+
+
+
+
+std::pair<bool, cv::Point> LidcamHelpers::pointInImagePlane(pcltype::Point point, Eigen::Matrix4d mat_point_transformer, cv::Size img_size) {
+
+    cv::Point point_in_image;
+    std::pair<bool, cv::Point> pair;
+
+    double distance = sqrt(pow(point.x, 2) + pow(point.y, 2));
+
+    if (distance <= 0.2)
+    {
+        pair.first = false;
+        pair.second = point_in_image;
+        return pair;
+    }
+
+    Eigen::Vector4d pos;
+    pos << point.x, point.y, point.z, 1;
+
+    Eigen::Vector4d vec_image_plane_coords = mat_point_transformer * pos;
+
+    //std::cout << vec_image_plane_coords << std::endl;
+
+    if (vec_image_plane_coords(2) <= 0)
+    {
+        pair.first = false;
+        pair.second = point_in_image;
+        return pair;
+    }
+
+    point_in_image.x = (int) (vec_image_plane_coords(0) / vec_image_plane_coords(2));
+    point_in_image.y = (int) (vec_image_plane_coords(1) / vec_image_plane_coords(2));
+
+    //std::cout << point_in_image.x << " " << point_in_image.y << std::endl;
+
+    if (point_in_image.x < 0
+        || point_in_image.y < 0
+        || point_in_image.x >= img_size.width
+        || point_in_image.y >= img_size.height)
+    {
+        pair.first = false;
+        pair.second = point_in_image;
+        return pair;
+    }
+
+    pair.first = true;
+    pair.second = point_in_image;
+    return pair;
+
+}
+
+
+
+bool LidcamHelpers::pointInDetection(const cv::Point &point, const vision_msgs::BoundingBox2D &bbox,const cv::Size &img_size, const int camera_id)
+{
+    const auto &bbox_orig = bbox;
+    auto new_bbox = bbox;
+
+    float scale_factor;
+    if (camera_id == 8 || camera_id == 9) {
+        scale_factor = 1.0;
+    } else {
+        scale_factor = 1.66666;
+    }
+
+    new_bbox.center.x *= scale_factor;
+    new_bbox.center.y *= scale_factor;
+    new_bbox.size_x *= scale_factor;
+    new_bbox.size_y *= scale_factor;
+
+//        float x_min = new_bbox.center.x - new_bbox.size_x / 2;
+//        float x_max = new_bbox.center.x + new_bbox.size_x / 2;
+//        float y_min = new_bbox.center.y - new_bbox.size_y / 2;
+//        float y_max = new_bbox.center.y + new_bbox.size_y / 2;
+
+    double re_align_size = 5;
+
+    double x_min = new_bbox.center.x - new_bbox.size_x / 2;
+    x_min = ((x_min - re_align_size) >= 0 ? (x_min - re_align_size) : 0);
+    double x_max = new_bbox.center.x + new_bbox.size_x / 2;
+    x_max = ((x_max + re_align_size) >= img_size.width ? img_size.width : (x_max + re_align_size));
+    double y_min = new_bbox.center.y - new_bbox.size_y / 2;
+    y_min = ((y_min - re_align_size) > 0 ? (y_min - re_align_size) : 0);
+    double y_max = new_bbox.center.y + new_bbox.size_y / 2;
+    y_max = ((y_max + re_align_size) > img_size.height ? img_size.height : (y_max + re_align_size));
+
+    return point.x > x_min &&
+           point.y > y_min &&
+           point.x < x_max &&
+           point.y < y_max;
+}
+
+
