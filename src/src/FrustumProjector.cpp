@@ -475,8 +475,6 @@ void FrustumProjector::CallbackDetections(
     int num_threads = 12;
     std::vector<boost::thread> thread_vec(num_threads);
 
-    Cloud::Ptr result_cloud(new Cloud);
-
     std::vector<std::vector<Cloud::Ptr>> thread_vector_cloud_frustums(num_threads);
 
     for(unsigned int i=0; i<num_threads; i++)
@@ -527,7 +525,6 @@ void FrustumProjector::CallbackDetections(
         *all_frustum_all_points += *cloud;
 
     auto stop3_2 = std::chrono::high_resolution_clock::now();
-
     auto duration3_2 = std::chrono::duration_cast<std::chrono::microseconds>(stop3_2 - start3_2);
     //std::cout << "Time taken by iteration with Boost threads: " <<
     //          duration3_2.count() << " microseconds" << std::endl;
@@ -580,6 +577,8 @@ void FrustumProjector::CallbackDetections(
         vector_clusters = PclStuff::Clusterer(frustum_cloud_all_centroids, cloud_frustum,2 * 0.25,
                                                    1,
                                                    999999);
+
+        assert(vector_clusters.size() == frustum_cloud_all_centroids->size());
 
         return thrust::make_tuple(vector_clusters,false, frustum_cloud_all_centroids, detection_id);
     };
