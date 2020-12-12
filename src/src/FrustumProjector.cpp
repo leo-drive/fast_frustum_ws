@@ -617,9 +617,7 @@ void FrustumProjector::CallbackDetections(
             object.score = interested_detections.detections[detection_id].results[0].score;
 
             detected_object_array.objects.push_back(object);
-
             frustum_closest_objects_center->points.push_back(closest_point);
-
 
             HelperRosRelated::PublishCloud<Point>(frustum_cloud_all_centroids,
                                                   image_detections_set.pub_frustum_cloud_centroid_,
